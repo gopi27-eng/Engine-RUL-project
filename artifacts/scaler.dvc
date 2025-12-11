@@ -1,0 +1,6 @@
+outs:
+- md5: 7bee16965b2548fe7abc97f66142963e.dir
+  size: 1452
+  nfiles: 1
+  hash: md5
+  path: scaler
