@@ -1,0 +1,12 @@
+[ 2025-12-11 12:59:22 ] 20 RULLogger - INFO - Log file initialized at: C:\sync data\Desktop\Engine failure prediction\logs\2025-12-11_12-59-22.log
+[ 2025-12-11 12:59:22 ] 72 RULLogger - INFO - --- Running S3 Uploader Demonstration ---
+[ 2025-12-11 12:59:25 ] 40 RULLogger - INFO - S3 Uploader initialized for bucket: rul-prediction-data-bucket
+[ 2025-12-11 12:59:25 ] 51 RULLogger - INFO - Starting upload of 'dummy_upload_s3.txt' to 'rul-prediction-data-bucket/raw_data/test_upload_20251211125925.txt'
+[ 2025-12-11 12:59:25 ] 59 RULLogger - ERROR - AWS credentials not found. Ensure .env or environment variables are loaded.
+[ 2025-12-11 12:59:25 ] 100 RULLogger - INFO - Upload attempt result: False
+[ 2025-12-11 12:59:25 ] 110 RULLogger - INFO - --- Running S3 Uploader Demonstration ---
+[ 2025-12-11 12:59:25 ] 1252 botocore.credentials - INFO - Found credentials in environment variables.
+[ 2025-12-11 12:59:25 ] 40 RULLogger - INFO - S3 Uploader initialized for bucket: rul-prediction-data-bucket
+[ 2025-12-11 12:59:25 ] 51 RULLogger - INFO - Starting upload of 'dummy_upload_s3.txt' to 'rul-prediction-data-bucket/raw_data/test_upload_20251211125925.txt'
+[ 2025-12-11 12:59:27 ] 55 RULLogger - INFO - Successfully uploaded raw_data/test_upload_20251211125925.txt
+[ 2025-12-11 12:59:27 ] 152 RULLogger - INFO - Upload attempt result: True

@@ -1,0 +1,15 @@
+[ 2025-12-11 13:06:47 ] 20 RULLogger - INFO - Log file initialized at: C:\sync data\Desktop\Engine failure prediction\logs\2025-12-11_13-06-47.log
+[ 2025-12-11 13:06:47 ] 36 RULLogger - INFO - Created processed artifact directory: artifacts/processed_data
+[ 2025-12-11 13:06:47 ] 95 RULLogger - INFO - Starting Data Preprocessing component.
+[ 2025-12-11 13:06:47 ] 109 RULLogger - INFO - Raw data loaded. Train shape: (20631, 26), Test shape: (13096, 26)
+[ 2025-12-11 13:06:47 ] 40 RULLogger - INFO - Calculating RUL and applying cap.
+[ 2025-12-11 13:06:47 ] 54 RULLogger - INFO - RUL calculated. Cap applied at 125 cycles.
+[ 2025-12-11 13:06:47 ] 62 RULLogger - INFO - Dropping 7 constant/redundant columns.
+[ 2025-12-11 13:06:47 ] 72 RULLogger - INFO - Final feature count for scaling: 17
+[ 2025-12-11 13:06:47 ] 62 RULLogger - INFO - Dropping 7 constant/redundant columns.
+[ 2025-12-11 13:06:47 ] 72 RULLogger - INFO - Final feature count for scaling: 17
+[ 2025-12-11 13:06:47 ] 81 RULLogger - INFO - Initializing and fitting MinMaxScaler on training data.
+[ 2025-12-11 13:06:47 ] 89 RULLogger - INFO - Data scaling complete for both train and test sets.
+[ 2025-12-11 13:06:48 ] 137 RULLogger - INFO - Processed training data saved to artifacts/processed_data\processed_train.csv
+[ 2025-12-11 13:06:48 ] 138 RULLogger - INFO - Processed test data saved to artifacts/processed_data\processed_test.csv
+[ 2025-12-11 13:06:48 ] 170 RULLogger - INFO - Data Preprocessing pipeline step finished successfully.

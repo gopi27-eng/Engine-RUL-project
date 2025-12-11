@@ -1,0 +1,11 @@
+[ 2025-12-11 13:59:18 ] 20 RULLogger - INFO - Log file initialized at: C:\sync data\Desktop\Engine failure prediction\logs\2025-12-11_13-59-18.log
+[ 2025-12-11 13:59:18 ] 100 RULLogger - INFO - --- Starting Prediction Pipeline ---
+[ 2025-12-11 13:59:18 ] 46 RULLogger - INFO - MinMaxScaler loaded successfully.
+[ 2025-12-11 13:59:18 ] 49 RULLogger - INFO - Trained LSTM Model loaded successfully.
+[ 2025-12-11 13:59:18 ] 126 RULLogger - INFO - Simulating latest data point for Engine ID 100 (Total cycles: 198)
+[ 2025-12-11 13:59:18 ] 88 RULLogger - INFO - Generating prediction...
+[ 2025-12-11 13:59:19 ] 139 RULLogger - INFO - 
+=======================================================
+[ 2025-12-11 13:59:19 ] 140 RULLogger - INFO - | FINAL RUL PREDICTION for Engine ID 100: 10.95 cycles |
+[ 2025-12-11 13:59:19 ] 141 RULLogger - INFO - =======================================================
+[ 2025-12-11 13:59:19 ] 143 RULLogger - INFO - Prediction Pipeline step finished successfully.

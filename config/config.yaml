@@ -1,0 +1,67 @@
+# config/config.yaml
+
+# AWS S3 Data Paths (Used by data_ingestion.py for cloud-based fetching)
+s3_data_paths:
+  bucket_name: "rul-prediction-data-bucket"
+  train_data: "raw/train_FD001.txt"
+  test_data: "raw/test_FD001.txt"
+  rul_data: "raw/RUL_FD001.txt"
+
+# Local Data Paths (For local testing/development)
+local_data_paths:
+  root_dir: "C:\\sync data\\Desktop\\Engine failure prediction\\Data"
+
+# Local Paths for Artifacts (Used by all stages to save intermediate files)
+artifact_paths:
+  root_dir: "artifacts"
+  raw_data_dir: "artifacts/raw_data"
+  processed_data_dir: "artifacts/processed_data"
+  model_dir: "artifacts/model"
+  scaler_dir: "artifacts/scaler"
+
+# Model Hyperparameters and Constants (The optimized values)
+model_constants:
+  window_length: 50             # Sequence length for LSTM input (X_train)
+  rul_limit: 125                # Piecewise linear RUL ceiling
+  epochs: 100                   # Max epochs for training
+  batch_size: 128
+  patience: 10                  # EarlyStopping patience
+  
+# Columns identified as constant and to be dropped
+dropped_columns:
+  - Op_Setting_3
+  - Sensor_1
+  - Sensor_5
+  - Sensor_10
+  - Sensor_16
+  - Sensor_18
+  - Sensor_19
+
+# Columns for raw data frame
+column_names:
+  - Engine_No
+  - Cycle
+  - Op_Setting_1
+  - Op_Setting_2
+  - Op_Setting_3
+  - Sensor_1
+  - Sensor_2
+  - Sensor_3
+  - Sensor_4
+  - Sensor_5
+  - Sensor_6
+  - Sensor_7
+  - Sensor_8
+  - Sensor_9
+  - Sensor_10
+  - Sensor_11
+  - Sensor_12
+  - Sensor_13
+  - Sensor_14
+  - Sensor_15
+  - Sensor_16
+  - Sensor_17
+  - Sensor_18
+  - Sensor_19
+  - Sensor_20
+  - Sensor_21

@@ -1,0 +1,6 @@
+[ 2025-12-11 12:52:23 ] 20 RULLogger - INFO - Log file initialized at: C:\sync data\Desktop\Engine failure prediction\logs\2025-12-11_12-52-23.log
+[ 2025-12-11 12:52:23 ] 95 RULLogger - INFO - --- Running S3 Uploader Demonstration ---
+[ 2025-12-11 12:52:23 ] 48 RULLogger - INFO - S3 Uploader initialized for bucket: rul-prediction-data-bucket using session.
+[ 2025-12-11 12:52:23 ] 60 RULLogger - INFO - Starting upload of 'dummy_upload.txt' to 'rul-prediction-data-bucket/raw_data/test_upload_20251211125223.txt'
+[ 2025-12-11 12:52:25 ] 74 RULLogger - ERROR - An unexpected error occurred during upload: Failed to upload dummy_upload.txt to rul-prediction-data-bucket/raw_data/test_upload_20251211125223.txt: An error occurred (InvalidAccessKeyId) when calling the PutObject operation: The AWS Access Key Id you provided does not exist in our records.
+[ 2025-12-11 12:52:25 ] 122 RULLogger - INFO - Upload attempt result: False

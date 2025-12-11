@@ -1,0 +1,15 @@
+[ 2025-12-11 13:03:27 ] 20 RULLogger - INFO - Log file initialized at: C:\sync data\Desktop\Engine failure prediction\logs\2025-12-11_13-03-27.log
+[ 2025-12-11 13:03:27 ] 22 RULLogger - INFO - Configuration file loaded successfully.
+[ 2025-12-11 13:03:27 ] 62 RULLogger - INFO - Created artifact directory: artifacts/raw_data
+[ 2025-12-11 13:03:27 ] 90 RULLogger - INFO - Starting Data Ingestion component in 'local' mode.
+[ 2025-12-11 13:03:27 ] 32 RULLogger - INFO - Reading local data from: C:\sync data\Desktop\Engine failure prediction\Data\train_FD001.txt
+[ 2025-12-11 13:03:27 ] 42 RULLogger - INFO - Successfully read local data. DataFrame shape: (20631, 24)
+[ 2025-12-11 13:03:27 ] 32 RULLogger - INFO - Reading local data from: C:\sync data\Desktop\Engine failure prediction\Data\test_FD001.txt
+[ 2025-12-11 13:03:27 ] 42 RULLogger - INFO - Successfully read local data. DataFrame shape: (13096, 24)
+[ 2025-12-11 13:03:27 ] 32 RULLogger - INFO - Reading local data from: C:\sync data\Desktop\Engine failure prediction\Data\RUL_FD001.txt
+[ 2025-12-11 13:03:27 ] 42 RULLogger - INFO - Successfully read local data. DataFrame shape: (100, 1)
+[ 2025-12-11 13:03:27 ] 80 RULLogger - INFO - Raw data artifact saved to artifacts/raw_data\train_FD001.txt.
+[ 2025-12-11 13:03:27 ] 80 RULLogger - INFO - Raw data artifact saved to artifacts/raw_data\test_FD001.txt.
+[ 2025-12-11 13:03:27 ] 80 RULLogger - INFO - Raw data artifact saved to artifacts/raw_data\RUL_FD001.txt.
+[ 2025-12-11 13:03:27 ] 119 RULLogger - INFO - Data Ingestion complete.
+[ 2025-12-11 13:03:27 ] 141 RULLogger - INFO - Ready for Data Preprocessing with files: artifacts/raw_data\train_FD001.txt, artifacts/raw_data\test_FD001.txt, artifacts/raw_data\RUL_FD001.txt
