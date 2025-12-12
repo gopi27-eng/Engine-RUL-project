@@ -9,7 +9,13 @@ s3_data_paths:
 
 # Local Data Paths (For local testing/development)
 local_data_paths:
+  # Keeping your specified absolute path for the root directory
   root_dir: "C:\\sync data\\Desktop\\Engine failure prediction\\Data"
+  
+  # FIX: These three keys were missing and caused the KeyError in data_preprocessing.py
+  train_file: train_FD001.txt
+  test_file: test_FD001.txt
+  true_rul_file: RUL_FD001.txt
 
 # Local Paths for Artifacts (Used by all stages to save intermediate files)
 artifact_paths:
@@ -18,15 +24,19 @@ artifact_paths:
   processed_data_dir: "artifacts/processed_data"
   model_dir: "artifacts/model"
   scaler_dir: "artifacts/scaler"
+  analysis_dir: "artifacts/analysis" # Added for completeness with analysis script
 
 # Model Hyperparameters and Constants (The optimized values)
 model_constants:
-  window_length: 50             # Sequence length for LSTM input (X_train)
-  rul_limit: 125                # Piecewise linear RUL ceiling
-  epochs: 100                   # Max epochs for training
+  window_length: 50              # Sequence length for LSTM input (X_train)
+  rul_limit: 125                 # Piecewise linear RUL ceiling
+  epochs: 100                    # Max epochs for training
   batch_size: 128
-  patience: 10                  # EarlyStopping patience
+  patience: 10                   # EarlyStopping patience
   
+  # NEW: Defines the window for the Rolling Mean feature engineering
+  rolling_window: 5              
+
 # Columns identified as constant and to be dropped
 dropped_columns:
   - Op_Setting_3

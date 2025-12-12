@@ -1,0 +1,54 @@
+
+env/
+
+# Byte-code and compiled files
+*.pyc
+__pycache__/
+
+# Distribution and packaging
+dist/
+build/
+*.egg-info
+.tox/
+
+# Installer logs
+pip-log.txt
+
+# Jupyter/IPython Notebook artifacts
+.ipynb_checkpoints
+
+
+*.csv  # If you have large data files in the root.
+*.data
+*.h5   # Old Keras format, often ignored. (Not needed since you use .keras)
+
+# Ignore any specific large raw data directories
+raw_data/
+temp_data/
+
+# Log files generated during training (e.g., TensorBoard logs)
+logs/
+tensorboard/
+tf_files/
+
+
+.DS_Store
+
+# Windows files
+Thumbs.db
+
+# Visual Studio Code
+.vscode/
+
+# PyCharm files
+.idea/
+
+
+.env
+instance/
+
+# Flask session files
+flask-session/
+
+# Any specific Docker build context you might create outside the standard structure
+.dockerignore

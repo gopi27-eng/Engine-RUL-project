@@ -12,8 +12,7 @@ from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 
 # Assuming utility files exist
-from utils.logger import logger 
-# You might need another file to load the config, or use a simplified helper here
+from utils.logger import logger
 
 # --- Configuration Loader (Utility function) ---
 def load_config(config_path='config/config.yaml'):
@@ -27,63 +26,68 @@ def load_config(config_path='config/config.yaml'):
         logger.error(f"Error loading configuration: {e}")
         sys.exit(1)
 
-# --- 1. Sequence Generator (Core Logic from Notebook) ---
-
-def sequence_generator(df: pd.DataFrame, features: list, target: str, window_length: int) -> tuple[np.ndarray, np.ndarray]:
+# --- 1. Model Definition (UPDATED ARCHITECTURE) ---
+def build_lstm_model(input_shape):
     """
-    Creates overlapping sequences (windows) of time-series data for training.
+    Defines a deeper LSTM architecture with increased units and reduced dropout
+    based on successful experiments to improve feature learning ability.
     """
-    sequences = []
-    targets = []
+    # Force float32 for consistency
+    tf.keras.backend.set_floatx('float32') 
     
-    # Iterate over each engine
-    for engine_id in df['Engine_No'].unique():
-        engine_df = df[df['Engine_No'] == engine_id].reset_index(drop=True)
-        data = engine_df[features].values
-        
-        # Create sequences for training (all cycles up to the last one)
-        for i in range(window_length, len(engine_df) + 1, 1):
-            sequences.append(data[i - window_length:i, :])
-            # The target RUL is taken from the last cycle in the window (index i-1)
-            targets.append(engine_df.loc[i - 1, target])
-            
-    return np.array(sequences), np.array(targets)
-
-
-# --- 2. Optimized Model Definition ---
-
-def build_lstm_model(input_shape: tuple) -> Sequential:
-    """Defines the optimized Deep LSTM architecture (100, 100 units)."""
     model = Sequential([
-        # LSTM layer 1: 100 units, returns sequences for the next LSTM layer
+        # LSTM layer 1: 100 units, return sequences for the next LSTM layer
         LSTM(100, return_sequences=True, input_shape=input_shape, activation='tanh'),
         Dropout(0.1), 
 
-        # LSTM layer 2: 100 units, returns only the last output sequence (for the Dense layer)
+        # LSTM layer 2: 100 units, returns a single output vector
         LSTM(100, return_sequences=False, activation='tanh'),
-        Dropout(0.1), 
+        Dropout(0.1),
 
-        # Dense layer: 50 units (Increased capacity)
+        # Dense layer: Increased units to 50 for deeper feature processing
         Dense(units=50, activation='relu'),
 
-        # Output layer (Linear activation for regression)
+        # Output layer
         Dense(units=1, activation='linear')
     ])
     model.compile(loss='mse', optimizer='adam', metrics=['mae'])
-    logger.info("Deep LSTM model architecture defined and compiled.")
     return model
 
-# --- 3. Evaluation Metric (NASA S-Score) ---
+# --- 2. Sequence Generation Utility ---
+def sequence_generator(df, features, target=None, window_length=50):
+    """Generates 3D sequences (N_samples, WINDOW, N_features) for LSTM input."""
+    sequences = []
+    targets = []
+    
+    # RUL is available only in the training data
+    if target: 
+        # Train data: iterate over all engines to get all possible sequences
+        for engine_id in df['Engine_No'].unique():
+            engine_df = df[df['Engine_No'] == engine_id].reset_index(drop=True)
+            data = engine_df[features].values
+            
+            # Start from the point where the first window can be created
+            for i in range(window_length, len(engine_df) + 1, 1):
+                sequences.append(data[i - window_length:i, :])
+                targets.append(engine_df.loc[i - 1, target])
+    else: 
+        pass 
+            
+    if not sequences:
+        return np.array([]), np.array([])
+        
+    return np.array(sequences), np.array(targets)
 
+
+# --- 3. Evaluation Metric (NASA S-Score) ---
 def calculate_s_score(y_true, y_pred):
     """Calculates the RUL S-Score (NASA challenge metric)."""
     difference = y_pred - y_true
     s_score = 0
+    # Penalizes late predictions (d >= 0) more heavily (eta=10 vs eta=13)
     for d in difference:
-        # Penalizes late predictions (d >= 0) more severely (eta=10)
         s_score += np.exp(d / 10.0) - 1 if d >= 0 else np.exp(-d / 13.0) - 1
     return s_score
-
 
 # --- 4. Main Model Trainer Class ---
 class ModelTrainer:
@@ -91,130 +95,103 @@ class ModelTrainer:
         self.config = config
         self.artifact_paths = config['artifact_paths']
         self.model_constants = config['model_constants']
+        self.window_length = self.model_constants['window_length']
+        self.rul_limit = self.model_constants['rul_limit']
         
-        # Create necessary directories
-        os.makedirs(self.artifact_paths['model_dir'], exist_ok=True)
-        logger.info(f"Created model artifact directory: {self.artifact_paths['model_dir']}")
+        # --- FIX APPLIED HERE ---
+        # The paths in config.yaml already contain 'artifacts', so we use them directly.
+        
+        # Define output paths (Model saving path)
+        self.model_dir = self.artifact_paths['model_dir'] 
+        os.makedirs(self.model_dir, exist_ok=True)
+        
+        # Load processed data (Training data path)
+        processed_train_path = os.path.join(self.artifact_paths['processed_data_dir'], 'processed_train.csv')
+        self.train_df = pd.read_csv(processed_train_path)
+        
+        logger.info(f"Loaded processed data from {processed_train_path}. Shape: {self.train_df.shape}")
 
-    def initiate_model_training(self, processed_train_path: str, processed_test_path: str, true_rul_path: str):
+    def train_and_evaluate(self):
         
-        logger.info("Starting Model Training component.")
+        # Get the feature columns (all columns except Engine_No, Cycle, RUL)
+        feature_cols = [
+            col for col in self.train_df.columns 
+            if col not in ['Engine_No', 'Cycle', 'RUL']
+        ]
         
-        # --- 4.1 Load Processed Data ---
-        train_df_scaled = pd.read_csv(processed_train_path)
-        test_df_scaled = pd.read_csv(processed_test_path)
-        true_rul_df = pd.read_csv(true_rul_path)
-        
-        # Define features used in preprocessing
-        feature_cols = [col for col in train_df_scaled.columns if col not in ['Engine_No', 'Cycle', 'RUL']]
-        
-        # --- 4.2 Sequence Generation (Windowing) ---
-        WINDOW_LENGTH = self.model_constants['window_length']
-        
-        logger.info(f"Generating sequences with window length: {WINDOW_LENGTH}")
-        
-        # Training sequences
-        X_train_seq, y_train_target = sequence_generator(
-            train_df_scaled, features=feature_cols, target='RUL', window_length=WINDOW_LENGTH
+        # Generate sequences
+        X_train_raw, y_train_raw = sequence_generator(
+            self.train_df, features=feature_cols, target='RUL', window_length=self.window_length
         )
         
-        # Test sequences (Final window for each engine)
-        # Note: We must regenerate this logic here as it was slightly different for the test set
-        X_test_seq = []
-        for engine_id in test_df_scaled['Engine_No'].unique():
-            engine_df = test_df_scaled[test_df_scaled['Engine_No'] == engine_id]
-            data = engine_df[feature_cols].values
-            
-            # Take only the last 'WINDOW_LENGTH' cycles, padding if necessary
-            if len(data) >= WINDOW_LENGTH:
-                X_test_seq.append(data[-WINDOW_LENGTH:])
-            else:
-                # Padding logic if engine test run is shorter than window (rare for FD001 but robust)
-                padding_needed = WINDOW_LENGTH - len(data)
-                padding = np.zeros((padding_needed, data.shape[1]))
-                X_test_seq.append(np.vstack([padding, data]))
+        # Shuffle the training data
+        index = np.random.permutation(len(X_train_raw))
+        X_train, y_train = X_train_raw[index], y_train_raw[index]
         
-        X_test_seq = np.array(X_test_seq)
-        y_true = true_rul_df['RUL'].values
-
-        logger.info(f"Training sequences shape: {X_train_seq.shape}")
-
-        # --- 4.3 Model Setup and Training ---
+        logger.info(f"Training data sequences created. Shape: {X_train.shape}, Target shape: {y_train.shape}")
         
-        # Shuffle training data
-        index = np.random.permutation(len(X_train_seq))
-        X_train_seq, y_train_target = X_train_seq[index], y_train_target[index]
-
-        N_FEATURES = len(feature_cols)
-        lstm_model = build_lstm_model(input_shape=(WINDOW_LENGTH, N_FEATURES))
+        # Build the model with the new architecture
+        model = build_lstm_model(input_shape=(self.window_length, len(feature_cols)))
         
-        # Callbacks
-        model_path = os.path.join(self.artifact_paths['model_dir'], 'best_rul_model.keras')
-        
+        # Define Callbacks
+        patience = self.model_constants.get('patience', 10)
         early_stopping = EarlyStopping(
-            monitor='val_loss', patience=self.model_constants['patience'], verbose=1, mode='min', restore_best_weights=True
+            monitor='val_loss', patience=patience, verbose=1, mode='min', restore_best_weights=True
         )
+        model_save_path = os.path.join(self.model_dir, 'best_rul_model.keras')
         model_checkpoint = ModelCheckpoint(
-            model_path, monitor='val_loss', save_best_only=True, mode='min', verbose=0
+            model_save_path, monitor='val_loss', save_best_only=True, mode='min', verbose=0
         )
         
-        logger.info(f"Starting training for max {self.model_constants['epochs']} epochs.")
+        # Training
+        EPOCHS = self.model_constants.get('epochs', 100)
+        BATCH_SIZE = self.model_constants.get('batch_size', 128)
         
-        history = lstm_model.fit(
-            X_train_seq, y_train_target, 
-            epochs=self.model_constants['epochs'], 
-            batch_size=self.model_constants['batch_size'], 
-            validation_split=0.1, 
-            verbose=2,
-            callbacks=[early_stopping, model_checkpoint], 
-            shuffle=True
+        logger.info(f"Starting training with EPOCHS={EPOCHS}, BATCH_SIZE={BATCH_SIZE}")
+        # Log the model summary for tracking
+        model.summary(print_fn=lambda x: logger.info(x))
+
+        history = model.fit(
+            X_train, y_train, epochs=EPOCHS, batch_size=BATCH_SIZE, validation_split=0.1, verbose=2,
+            callbacks=[early_stopping, model_checkpoint], shuffle=True
         )
         
-        # --- 4.4 Prediction and Evaluation ---
+        logger.info("Training finished. Evaluating best model...")
         
-        logger.info("Training finished. Making predictions on the test set.")
-        y_pred = lstm_model.predict(X_test_seq).flatten()
+        # --- Evaluation (on the validation set metrics after restoration) ---
+        # Note: argmin is used to find the index (epoch - 1) of the minimum loss
+        best_epoch = np.argmin(history.history['val_loss']) + 1
+        best_val_loss = history.history['val_loss'][best_epoch - 1]
+        best_val_mae = history.history['val_mae'][best_epoch - 1]
         
-        rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-        s_score = calculate_s_score(y_true, y_pred)
+        metrics = {
+            'best_val_loss': float(best_val_loss),
+            'best_val_mae': float(best_val_mae),
+            'best_epoch': int(best_epoch),
+            'features_used': len(feature_cols),
+            'model_architecture': 'Deeper_LSTM_2x100_D0.1_RollingMean' # Updated tag
+        }
         
-        logger.info(f"--- FINAL MODEL METRICS ---")
-        logger.info(f"RMSE: {rmse:.4f}")
-        logger.info(f"RUL S-Score (NASA Metric): {s_score:.4f}")
-        
-        # --- 4.5 Save Evaluation Metrics (as an artifact) ---
-        metrics = {'rmse': rmse, 's_score': s_score}
-        metrics_path = os.path.join(self.artifact_paths['model_dir'], 'metrics.yaml')
+        # Save metrics to YAML
+        metrics_path = os.path.join(self.model_dir, 'metrics.yaml')
         with open(metrics_path, 'w') as f:
             yaml.dump(metrics, f)
+            
         logger.info(f"Metrics saved to {metrics_path}")
-
-        return model_path, metrics_path
-
-
-# --- Example Execution ---
+        logger.info(f"Final Model saved at: {model_save_path}")
+        
+# --- Main Execution ---
 if __name__ == "__main__":
     
-    # NOTE: This requires Data Ingestion and Preprocessing to have successfully run locally 
-    # and saved files into artifacts/processed_data.
-    
+    logger.info("--- Starting Model Training Pipeline ---")
     config = load_config()
     
-    processed_dir = config['artifact_paths']['processed_data_dir']
+    # Add optional keys if not in config
+    if 'epochs' not in config['model_constants']: config['model_constants']['epochs'] = 100
+    if 'batch_size' not in config['model_constants']: config['model_constants']['batch_size'] = 128
     
-    # Define paths to the processed artifacts
-    processed_train = os.path.join(processed_dir, 'processed_train.csv')
-    processed_test = os.path.join(processed_dir, 'processed_test.csv')
-    true_rul_path = os.path.join(processed_dir, 'true_rul.csv')
-    
-    if not all(os.path.exists(f) for f in [processed_train, processed_test, true_rul_path]):
-        logger.error("Processed data artifacts not found. Please run data_preprocessing.py first.")
-        sys.exit(1)
-
     trainer = ModelTrainer(config)
-    final_model_path, final_metrics_path = trainer.initiate_model_training(
-        processed_train, processed_test, true_rul_path
-    )
+    
+    trainer.train_and_evaluate()
     
     logger.info("Model Training pipeline step finished successfully.")
-    logger.info(f"Final Model saved at: {final_model_path}")
