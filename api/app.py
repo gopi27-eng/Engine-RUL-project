@@ -8,8 +8,10 @@ from tensorflow.keras.models import load_model
 from flask import Flask, request, render_template
 
 # --- Configuration ---
-MODEL_PATH = 'artifacts/model/best_rul_model.keras'
-SCALER_PATH = 'artifacts/scaler/minmax_scaler.pkl'
+# CORRECTED PATHS based on user's file structure
+MODEL_PATH = 'artifacts/model/best_rul_model.keras' 
+SCALER_PATH = 'artifacts/scaler/minmax_scaler.pkl' 
+
 # CRITICAL FIX: Use /tmp/ for database to ensure write permissions on Render/Cloud
 DB_PATH = '/tmp/prediction_history.db' 
 WINDOW_LENGTH = 50 # Sequence window length for the LSTM model
@@ -89,14 +91,19 @@ class RULPredictionService:
         """Scales, sequences data, and makes the RUL prediction."""
         
         # 1. Scaling the data
-        # We only scale the sensor columns (assuming cols 5 to 25 are sensors)
+        # Assuming sensor columns are indices 5 to 25 (21 sensors)
         cols_to_scale = input_df.columns[5:26]
+        
+        # Check if the scaler has been fitted. If not, this will raise an error, 
+        # but since we load it from a file, it should be fitted.
+        if hasattr(self.scaler, 'n_features_in_') and self.scaler.n_features_in_ != len(cols_to_scale):
+            raise ValueError(f"Feature mismatch: Expected {self.scaler.n_features_in_} features, found {len(cols_to_scale)} for scaling.")
+            
         scaled_data = self.scaler.transform(input_df[cols_to_scale])
         
         # 2. Sequence creation (using only the last 'window_length' cycles)
         if len(scaled_data) < self.window_length:
-            # Pad or handle insufficient data if necessary. For now, assume sufficient.
-            raise ValueError(f"Insufficient data (only {len(scaled_data)} cycles). Need at least {self.window_length} cycles.")
+            raise ValueError(f"Insufficient data ({len(scaled_data)} cycles). Need at least {self.window_length} cycles for prediction.")
             
         # Get the last sequence of the scaled data
         sequence = scaled_data[-self.window_length:]
@@ -134,11 +141,17 @@ def predictor_ui():
             uploaded_file = request.files.get('file')
             if not uploaded_file or uploaded_file.filename == '':
                 raise ValueError("No file selected.")
-
-            # 2. Read data (assuming it's a CSV)
-            input_df = pd.read_csv(uploaded_file)
+                
+            # 2. Read data (CRITICAL ENCODING FIX)
+            try:
+                # Try to read the file using standard UTF-8 encoding
+                input_df = pd.read_csv(uploaded_file, encoding='utf-8')
+            except UnicodeDecodeError:
+                # If UTF-8 fails (e.g., Windows-saved file), reset pointer and try Latin-1
+                uploaded_file.seek(0)
+                input_df = pd.read_csv(uploaded_file, encoding='latin1')
             
-            # Basic validation
+            # Basic data validation
             if input_df.shape[1] != 26:
                 raise ValueError(f"Data format invalid: Expected 26 columns, received {input_df.shape[1]}.")
             if 'Engine_No' not in input_df.columns or 'Cycle' not in input_df.columns:
@@ -165,6 +178,8 @@ def predictor_ui():
             }
             
         except Exception as e:
+            # Log the full exception for debugging, but show a clean error to the user
+            print(f"Runtime Prediction Error: {e}") 
             return render_template('index.html', error=f"Prediction Error: {e}")
 
     return render_template('index.html', result=result)
