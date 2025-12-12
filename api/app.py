@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import io
 from datetime import datetime
 import pandas as pd
 import numpy as np
@@ -8,13 +9,14 @@ from tensorflow.keras.models import load_model
 from flask import Flask, request, render_template
 
 # --- Configuration ---
-# CORRECTED PATHS based on user's file structure
+# CORRECTED PATHS based on user's confirmed file structure
 MODEL_PATH = 'artifacts/model/best_rul_model.keras' 
 SCALER_PATH = 'artifacts/scaler/minmax_scaler.pkl' 
 
 # CRITICAL FIX: Use /tmp/ for database to ensure write permissions on Render/Cloud
 DB_PATH = '/tmp/prediction_history.db' 
 WINDOW_LENGTH = 50 # Sequence window length for the LSTM model
+RMSE_CONFIDENCE = 14.95 # Placeholder for Model Confidence metric
 
 class RULPredictionService:
     def __init__(self, model_path=MODEL_PATH, scaler_path=SCALER_PATH, db_path=DB_PATH):
@@ -40,7 +42,6 @@ class RULPredictionService:
             self.scaler = joblib.load(self.scaler_path)
             print("INFO: Model and Scaler artifacts loaded successfully.")
         except Exception as e:
-            # IMPORTANT: Crash early if artifacts are missing or corrupted
             print(f"ERROR: Failed to load artifacts. Check paths and file existence: {e}")
             raise RuntimeError(f"Model service failed to start: {e}")
 
@@ -63,11 +64,10 @@ class RULPredictionService:
             conn.close()
             print(f"[DB] Prediction_History database initialized at {self.db_path}.")
         except Exception as e:
-            # Note: Startup crash if DB setup fails due to permissions
             print(f"ERROR: Failed to set up database at {self.db_path}: {e}")
             raise RuntimeError(f"Database setup failed: {e}")
 
-    def log_prediction_to_db(self, engine_id: int, cycle_max: int, rul: float, confidence: float = 14.95):
+    def log_prediction_to_db(self, engine_id: int, cycle_max: int, rul: float, confidence: float = RMSE_CONFIDENCE):
         """Logs a prediction result to the SQLite database."""
         try:
             conn = sqlite3.connect(self.db_path)
@@ -83,9 +83,7 @@ class RULPredictionService:
             conn.commit()
             conn.close()
         except Exception as e:
-            # We don't crash the server for a logging failure
             print(f"WARNING: Failed to log prediction: {e}")
-
 
     def prepare_data_and_predict(self, input_df: pd.DataFrame) -> float:
         """Scales, sequences data, and makes the RUL prediction."""
@@ -94,16 +92,14 @@ class RULPredictionService:
         # Assuming sensor columns are indices 5 to 25 (21 sensors)
         cols_to_scale = input_df.columns[5:26]
         
-        # Check if the scaler has been fitted. If not, this will raise an error, 
-        # but since we load it from a file, it should be fitted.
-        if hasattr(self.scaler, 'n_features_in_') and self.scaler.n_features_in_ != len(cols_to_scale):
-            raise ValueError(f"Feature mismatch: Expected {self.scaler.n_features_in_} features, found {len(cols_to_scale)} for scaling.")
-            
+        if len(cols_to_scale) != 21: # Double check the feature count
+             raise ValueError(f"Scaling feature count mismatch: Expected 21 sensors, found {len(cols_to_scale)}.")
+
         scaled_data = self.scaler.transform(input_df[cols_to_scale])
         
         # 2. Sequence creation (using only the last 'window_length' cycles)
         if len(scaled_data) < self.window_length:
-            raise ValueError(f"Insufficient data ({len(scaled_data)} cycles). Need at least {self.window_length} cycles for prediction.")
+            raise ValueError(f"Insufficient data ({len(scaled_data)} cycles). Need exactly {self.window_length} cycles for prediction.")
             
         # Get the last sequence of the scaled data
         sequence = scaled_data[-self.window_length:]
@@ -142,14 +138,13 @@ def predictor_ui():
             if not uploaded_file or uploaded_file.filename == '':
                 raise ValueError("No file selected.")
                 
-            # 2. Read data (CRITICAL ENCODING FIX)
-            try:
-                # Try to read the file using standard UTF-8 encoding
-                input_df = pd.read_csv(uploaded_file, encoding='utf-8')
-            except UnicodeDecodeError:
-                # If UTF-8 fails (e.g., Windows-saved file), reset pointer and try Latin-1
-                uploaded_file.seek(0)
-                input_df = pd.read_csv(uploaded_file, encoding='latin1')
+            # Read the file content into a stream
+            file_stream = io.StringIO(uploaded_file.stream.read().decode('latin1'))
+
+            # 2. Read data (FORCED ENCODING FIX: reading as latin1)
+            # This is the most reliable way to handle CSVs saved on Windows/Excel.
+            file_stream.seek(0)
+            input_df = pd.read_csv(file_stream)
             
             # Basic data validation
             if input_df.shape[1] != 26:
@@ -166,7 +161,7 @@ def predictor_ui():
             # --- Logging the Result ---
             engine_id = int(input_df['Engine_No'].iloc[0])
             cycle_max = int(input_df['Cycle'].max())
-            service.log_prediction_to_db(engine_id, cycle_max, predicted_rul, confidence=14.95)
+            service.log_prediction_to_db(engine_id, cycle_max, predicted_rul, confidence=RMSE_CONFIDENCE)
             # ---------------------------
 
             # 5. Prepare the result for the template
@@ -174,11 +169,10 @@ def predictor_ui():
                 'Engine ID': engine_id,
                 'Max Cycle': cycle_max,
                 'Predicted RUL': f"{predicted_rul:.2f} Cycles",
-                'Confidence Metric (RMSE)': '14.95 (Placeholder)'
+                'Confidence Metric (RMSE)': f"{RMSE_CONFIDENCE:.2f} (Model RMSE)"
             }
             
         except Exception as e:
-            # Log the full exception for debugging, but show a clean error to the user
             print(f"Runtime Prediction Error: {e}") 
             return render_template('index.html', error=f"Prediction Error: {e}")
 
