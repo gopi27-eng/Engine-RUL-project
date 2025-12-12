@@ -8,8 +8,8 @@ from tensorflow.keras.models import load_model
 from flask import Flask, request, render_template
 
 # --- Configuration ---
-MODEL_PATH = 'artifacts/model.h5'
-SCALER_PATH = 'artifacts/scaler.pkl'
+MODEL_PATH = 'artifacts/model/best_rul_model.keras'
+SCALER_PATH = 'artifacts/scaler/minmax_scaler.pkl'
 # CRITICAL FIX: Use /tmp/ for database to ensure write permissions on Render/Cloud
 DB_PATH = '/tmp/prediction_history.db' 
 WINDOW_LENGTH = 50 # Sequence window length for the LSTM model
