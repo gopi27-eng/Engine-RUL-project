@@ -1,195 +1,175 @@
-# api/app.py
-
-import pandas as pd
-from flask import Flask, request, jsonify, render_template
 import os
+import sqlite3
+from datetime import datetime
+import pandas as pd
 import numpy as np
-import pickle
-from tensorflow.keras.models import load_model # Assumes TensorFlow is installed
+import joblib
+from tensorflow.keras.models import load_model
+from flask import Flask, request, render_template
 
-# --- 1. RUL Prediction Service Class ---
+# --- Configuration ---
+MODEL_PATH = 'artifacts/model.h5'
+SCALER_PATH = 'artifacts/scaler.pkl'
+# CRITICAL FIX: Use /tmp/ for database to ensure write permissions on Render/Cloud
+DB_PATH = '/tmp/prediction_history.db' 
+WINDOW_LENGTH = 50 # Sequence window length for the LSTM model
+
 class RULPredictionService:
-    def __init__(self, model_path, scaler_path, window_length=50):
+    def __init__(self, model_path=MODEL_PATH, scaler_path=SCALER_PATH, db_path=DB_PATH):
         self.model_path = model_path
         self.scaler_path = scaler_path
-        self.window_length = window_length
+        self.db_path = db_path
+        self.window_length = WINDOW_LENGTH
+        
+        # Artifacts will be loaded here
         self.model = None
         self.scaler = None
-        self.feature_cols = None
-        self.RUL_LIMIT = 125 # The max RUL value used for target capping
-
+        
         self._load_artifacts()
+        self._setup_database()
 
     def _load_artifacts(self):
-        """Loads the trained Keras model, MinMaxScaler, and feature names."""
+        """Loads the trained Keras model and the MinMaxScaler."""
         try:
-            # 1. Load Model (Best Practice: Use .keras format)
+            # Load Keras Model
             self.model = load_model(self.model_path)
             
-            # 2. Load Scaler
-            with open(self.scaler_path, 'rb') as f:
-                self.scaler = pickle.load(f)
-            
-            # 3. Load feature names (must match the training order, including rolling means)
-            processed_train_path = 'artifacts/processed_data/processed_train.csv'
-            
-            if not os.path.exists(processed_train_path):
-                 print(f"ERROR: Processed data not found at {processed_train_path}")
-                 # Ensure this file exists in your project structure!
-                 raise FileNotFoundError("Required processed training data (for feature names) not found.")
-
-            temp_df = pd.read_csv(processed_train_path)
-            
-            self.feature_cols = [
-                col for col in temp_df.columns 
-                if col not in ['Engine_No', 'Cycle', 'RUL']
-            ]
-            
-            print(f"[SERVICE] Loaded model, scaler, and {len(self.feature_cols)} features.")
-
+            # Load Scaler
+            self.scaler = joblib.load(self.scaler_path)
+            print("INFO: Model and Scaler artifacts loaded successfully.")
         except Exception as e:
-            print(f"[ERROR] Failed to load artifacts: {e}")
-            raise RuntimeError("Model service initialization failed.")
+            # IMPORTANT: Crash early if artifacts are missing or corrupted
+            print(f"ERROR: Failed to load artifacts. Check paths and file existence: {e}")
+            raise RuntimeError(f"Model service failed to start: {e}")
 
-    def create_rolling_features(self, df: pd.DataFrame, window: int = 5) -> pd.DataFrame:
-        """Calculates rolling mean features on the input data for all sensor columns."""
-        
-        # Identify sensor columns (S_1 to S_21)
-        original_sensor_cols = [col for col in df.columns if 'Sensor_' in col]
-        
-        # Apply rolling mean
-        for col in original_sensor_cols:
-            new_col_name = f'{col}_roll_mean_{window}'
-            # Apply rolling mean, setting min_periods=1 allows calculation on the first few rows
-            df[new_col_name] = df[col].rolling(window=window, min_periods=1).mean()
-        
-        return df
+    def _setup_database(self):
+        """Creates the SQLite table for logging predictions if it doesn't exist."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS Prediction_History (
+                    Prediction_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Timestamp TEXT NOT NULL,
+                    Engine_ID INTEGER NOT NULL,
+                    Cycle_Max INTEGER NOT NULL,
+                    Predicted_RUL REAL NOT NULL,
+                    Model_Confidence REAL
+                );
+            """)
+            conn.commit()
+            conn.close()
+            print(f"[DB] Prediction_History database initialized at {self.db_path}.")
+        except Exception as e:
+            # Note: Startup crash if DB setup fails due to permissions
+            print(f"ERROR: Failed to set up database at {self.db_path}: {e}")
+            raise RuntimeError(f"Database setup failed: {e}")
 
-    def prepare_data_and_predict(self, raw_df: pd.DataFrame) -> float:
-        """
-        Prepares raw sensor data for prediction and applies the LSTM model.
-        This contains the complete, debugged pipeline.
-        """
-        
-        # 1. Feature Engineering (Rolling Means)
-        df_featured = self.create_rolling_features(raw_df.copy())
-        
-        # 2. Scaling (Align and Transform)
-        df_featured_aligned = df_featured[self.feature_cols].copy()
-        
-        # Transform the data using the loaded scaler
-        # Note: .loc[] is used for stability in setting values on a slice
-        df_featured_aligned.loc[:, self.feature_cols] = self.scaler.transform(df_featured_aligned[self.feature_cols])
+    def log_prediction_to_db(self, engine_id: int, cycle_max: int, rul: float, confidence: float = 14.95):
+        """Logs a prediction result to the SQLite database."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            cursor.execute("""
+                INSERT INTO Prediction_History 
+                (Timestamp, Engine_ID, Cycle_Max, Predicted_RUL, Model_Confidence) 
+                VALUES (?, ?, ?, ?, ?);
+            """, (timestamp_str, engine_id, cycle_max, rul, confidence))
+            
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            # We don't crash the server for a logging failure
+            print(f"WARNING: Failed to log prediction: {e}")
 
 
-        # 3. Sequence Generation
-        # Get the last 'window_length' (50) cycles
-        sequence = df_featured_aligned.values[-self.window_length:]
-
+    def prepare_data_and_predict(self, input_df: pd.DataFrame) -> float:
+        """Scales, sequences data, and makes the RUL prediction."""
+        
+        # 1. Scaling the data
+        # We only scale the sensor columns (assuming cols 5 to 25 are sensors)
+        cols_to_scale = input_df.columns[5:26]
+        scaled_data = self.scaler.transform(input_df[cols_to_scale])
+        
+        # 2. Sequence creation (using only the last 'window_length' cycles)
+        if len(scaled_data) < self.window_length:
+            # Pad or handle insufficient data if necessary. For now, assume sufficient.
+            raise ValueError(f"Insufficient data (only {len(scaled_data)} cycles). Need at least {self.window_length} cycles.")
+            
+        # Get the last sequence of the scaled data
+        sequence = scaled_data[-self.window_length:]
+        
         # Reshape for LSTM: (1, window_length, n_features)
-        X = sequence.reshape(1, self.window_length, len(self.feature_cols))
-
-        # ------------------------------------------------------------------
-        # --- DEBUG: Console Output to verify scaling ---
-        # ------------------------------------------------------------------
-        print("\n--- DEBUG: LSTM Input Array (X) Analysis ---")
-        print(f"Shape of X: {X.shape}")
-        print(f"Min value in X: {np.min(X):.4f}")
-        print(f"Max value in X: {np.max(X):.4f}")
-        # ------------------------------------------------------------------
-
-
-        # 4. Prediction
-        # Predict: Output is a NumPy array, e.g., [[105.4]]
-        raw_prediction_array = self.model.predict(X, verbose=0)
+        X_test_sequence = sequence.reshape(1, self.window_length, sequence.shape[1])
         
-        # Extract the scalar RUL value (already unscaled, as confirmed by debug)
-        predicted_rul_scalar = float(raw_prediction_array[0][0]) 
-
-        # 5. Inverse Transformation & Capping (FINAL ROBUST FIX)
-        # Use numpy.clip to cap the prediction between 0 and RUL_LIMIT (125)
-        predicted_rul = np.clip(predicted_rul_scalar, 0, self.RUL_LIMIT)
+        # 3. Prediction
+        predicted_rul = self.model.predict(X_test_sequence)[0][0]
         
-        # Convert the result back to a standard Python float for the return
-        return float(predicted_rul)
+        # RUL must be non-negative
+        return max(0, float(predicted_rul))
 
-# --- 2. Flask Application Setup ---
-# Set paths relative to the project root
-MODEL_PATH = 'artifacts/model/best_rul_model.keras'
-SCALER_PATH = 'artifacts/scaler/minmax_scaler.pkl'
-WINDOW_LENGTH = 50 
+# --- Flask Application Initialization ---
+app = Flask(__name__, template_folder='templates')
 
-# --- Initialize the Prediction Service ---
+# Initialize the service instance (This runs once when the Flask app starts)
 try:
-    service = RULPredictionService(MODEL_PATH, SCALER_PATH, WINDOW_LENGTH)
-    app = Flask(__name__)
-    print("--- RUL Prediction Service Initialized Successfully ---")
-except Exception as e:
-    service = None 
-    app = Flask(__name__) 
-    print(f"FATAL: Service initialization failed. Check logs above. {e}")
+    service = RULPredictionService()
+except RuntimeError:
+    # Service failed to initialize (e.g., artifacts missing, DB error)
+    service = None
 
-# Define the expected raw columns for the incoming CSV data
-RAW_COLUMNS = ['Engine_No', 'Cycle', 'Op_Setting_1', 'Op_Setting_2', 'Op_Setting_3',
-               'Sensor_1', 'Sensor_2', 'Sensor_3', 'Sensor_4', 'Sensor_5', 'Sensor_6', 
-               'Sensor_7', 'Sensor_8', 'Sensor_9', 'Sensor_10', 'Sensor_11', 'Sensor_12', 
-               'Sensor_13', 'Sensor_14', 'Sensor_15', 'Sensor_16', 'Sensor_17', 
-               'Sensor_18', 'Sensor_19', 'Sensor_20', 'Sensor_21']
-
-# --- 3. Flask Routes (UI and API) ---
+# --- Flask Routes ---
 
 @app.route('/', methods=['GET', 'POST'])
 def predictor_ui():
+    result = None
     if service is None:
-        return render_template('index.html', error="Model service is currently offline. Check artifact paths and server logs.")
-
-    if request.method == 'GET':
-        return render_template('index.html')
-
-    elif request.method == 'POST':
-        # --- Handle form submission from the UI ---
-        raw_data_string = request.form.get('sensor_data')
+        return render_template('index.html', error="Model service is currently offline. Check artifact paths and server logs."), 503
         
-        if not raw_data_string:
-            return render_template('index.html', error="No data provided in the input box.")
-
+    if request.method == 'POST':
         try:
-            # 1. Parse the CSV data string
-            data_list = []
-            for line in raw_data_string.strip().split('\n'):
-                if line.strip():
-                    data_list.append([float(x.strip()) for x in line.split(',')])
+            # 1. Get uploaded file
+            uploaded_file = request.files.get('file')
+            if not uploaded_file or uploaded_file.filename == '':
+                raise ValueError("No file selected.")
 
-            # 2. Create DataFrame
-            input_df = pd.DataFrame(data_list, columns=RAW_COLUMNS)
+            # 2. Read data (assuming it's a CSV)
+            input_df = pd.read_csv(uploaded_file)
             
-            # 3. Validation
-            if input_df.shape[0] < service.window_length:
-                raise ValueError(f"Data must contain at least {service.window_length} cycles. Found {input_df.shape[0]}.")
-            if input_df.shape[1] != len(RAW_COLUMNS):
-                 raise ValueError(f"Data must contain exactly {len(RAW_COLUMNS)} columns. Found {input_df.shape[1]}.")
+            # Basic validation
+            if input_df.shape[1] != 26:
+                raise ValueError(f"Data format invalid: Expected 26 columns, received {input_df.shape[1]}.")
+            if 'Engine_No' not in input_df.columns or 'Cycle' not in input_df.columns:
+                raise ValueError("Data format invalid: Missing 'Engine_No' or 'Cycle' columns.")
+
+            # 3. Ensure data is sorted by cycle for correct sequencing
+            input_df = input_df.sort_values(by=['Engine_No', 'Cycle']).reset_index(drop=True)
 
             # 4. Call the prediction service
             predicted_rul = service.prepare_data_and_predict(input_df)
+            
+            # --- Logging the Result ---
+            engine_id = int(input_df['Engine_No'].iloc[0])
+            cycle_max = int(input_df['Cycle'].max())
+            service.log_prediction_to_db(engine_id, cycle_max, predicted_rul, confidence=14.95)
+            # ---------------------------
 
             # 5. Prepare the result for the template
             result = {
-                "predicted_rul_cycles": round(predicted_rul, 1),
-                "model_confidence": "High (Corrected RMSE)", # Adjusted for the successful fix
-                "warning_level": "CRITICAL: Schedule maintenance NOW." if predicted_rul < 20 else ("WARNING: Schedule maintenance SOON." if predicted_rul < 50 else "Monitoring"),
-                "action_required": "Prediction pipeline is validated. Prediction is reliable."
+                'Engine ID': engine_id,
+                'Max Cycle': cycle_max,
+                'Predicted RUL': f"{predicted_rul:.2f} Cycles",
+                'Confidence Metric (RMSE)': '14.95 (Placeholder)'
             }
             
-            # 6. Render the template with the results
-            return render_template('index.html', result=result)
-
-        except ValueError as e:
-            return render_template('index.html', error=f"Data parsing or validation error: {e}")
         except Exception as e:
-            print(f"Prediction Error (Uncaught): {e}") # Keep the debug print for uncaught errors
-            return render_template('index.html', error="Internal server error during prediction. Check server console for traceback.")
+            return render_template('index.html', error=f"Prediction Error: {e}")
 
-# --- 4. Main Execution ---
+    return render_template('index.html', result=result)
+
+# --- Entry Point for Gunicorn/Web Server ---
 if __name__ == '__main__':
-    # Running locally
-    app.run(host='127.0.0.1', port=5000, debug=True, use_reloader=False)
+    # This block is typically for local testing only
+    app.run(debug=True, host='0.0.0.0', port=5000)
