@@ -1,6 +1,6 @@
 
 env/
-
+.env/
 # Byte-code and compiled files
 *.pyc
 __pycache__/
